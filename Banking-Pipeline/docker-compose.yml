@@ -1,0 +1,213 @@
+name: banking-pipline
+networks:
+  redpanda_network:
+    name: banking-mds-net
+    driver: bridge
+
+volumes:
+  redpanda-0: null
+  redpanda-1: null
+  redpanda-2: null
+  # airflow_postgres_data:
+  postgres_data:
+
+services:
+  # Redpanda Cluster
+  redpanda-0:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda-0
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda-0:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda-0:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda-0:33145
+      - --advertise-rpc-addr redpanda-0:33145
+    ports:
+      - 18081:18081
+      - 18082:18082
+      - 19092:19092   
+    networks:
+      redpanda_network:
+  redpanda-1:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda-1
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:29092
+      - --advertise-kafka-addr internal://redpanda-1:9092,external://localhost:29092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:28082
+      - --advertise-pandaproxy-addr internal://redpanda-1:8082,external://localhost:28082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:28081
+      - --rpc-addr redpanda-1:33145
+      - --advertise-rpc-addr redpanda-1:33145
+      - --seeds redpanda-0:33145
+    ports:
+      - 28081:28081
+      - 28082:28082
+      - 29092:29092
+    depends_on:
+      - redpanda-0
+    networks:
+      redpanda_network:
+  redpanda-2:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda-2
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:39092
+      - --advertise-kafka-addr internal://redpanda-2:9092,external://localhost:39092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:38082
+      - --advertise-pandaproxy-addr internal://redpanda-2:8082,external://localhost:38082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:38081
+      - --rpc-addr redpanda-2:33145
+      - --advertise-rpc-addr redpanda-2:33145
+      - --seeds redpanda-0:33145
+    ports:
+      - 38081:38081
+      - 38082:38082
+      - 39092:39092
+    depends_on:
+      - redpanda-0
+    networks:
+      redpanda_network:
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: redpanda-console
+    volumes:
+      - ./.license/redpanda.license:/etc/redpanda/redpanda.license:ro
+      - ./config:/tmp/config
+    entrypoint: /bin/sh
+    command: -c "/app/console"
+    environment:
+      # REDPANDA_LICENSE_FILEPATH: /etc/redpanda/redpanda.license
+      CONFIG_FILEPATH: /tmp/config/config.yml
+      
+    networks:
+      redpanda_network:      
+        
+    ports:
+      - 8080:8080
+    # depends_on:
+    #   redpanda-0:
+    #     condition: service_healthy
+      # createtopic:
+      #   condition: service_completed_successfully 
+  # Redpanda Connect with Postgres CDC Connector
+  con-pg-cdc:
+    container_name: rp-connect-pg-cdc
+    image: docker.redpanda.com/redpandadata/connect:latest
+    networks:
+      - redpanda_network
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+    #   redpanda-0:
+    #     condition: service_healthy
+    volumes:
+      - ./connect/postgres_cdc/connect.yml:/etc/connect/postgres_cdc.yml:ro
+      - ./.license/redpanda.license:/etc/redpanda/redpanda.license:ro
+    environment:
+      REDPANDA_LICENSE_FILEPATH: "/etc/redpanda/redpanda.license"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+    entrypoint: /bin/sh
+    command: -c '/redpanda-connect -c /etc/connect/postgres_cdc.yml'
+
+  # Postgres Database for Banking Application
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker/postgres/data:/var/lib/postgresql/data
+    command: >
+      postgres -c wal_level=logical
+              -c max_wal_senders=10
+              -c max_replication_slots=10
+    networks:
+      - redpanda_network
+               
+  # minio:
+  #   image: minio/minio:latest
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+  #     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   volumes:
+  #     - ./docker/minio/data:/data
+    
+  # airflow-webserver:
+  #   build:
+  #     context: .
+  #     dockerfile: dockerfile-airflow.dockerfile
+  #   container_name: airflow-webserver
+  #   restart: always
+  #   depends_on:
+  #     - airflow-scheduler
+  #     - airflow-postgres
+  #   environment:
+  #     - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  #     - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres:5432/${AIRFLOW_DB_NAME}
+  #   volumes:
+  #     - ./docker/dags:/opt/airflow/dags
+  #     - ./docker/logs:/opt/airflow/logs
+  #     - ./docker/plugins:/opt/airflow/plugins
+  #     - ./banking_dbt:/opt/airflow/banking_dbt
+  #     - ./banking_dbt/.dbt:/home/airflow/.dbt
+  #   ports:
+  #     - "8080:8080"
+  #   command: webserver
+
+  # airflow-scheduler:
+  #   build:
+  #     context: .
+  #     dockerfile: dockerfile-airflow.dockerfile
+  #   container_name: airflow-scheduler
+  #   restart: always
+  #   depends_on:
+  #     - airflow-postgres
+  #   environment:
+  #     - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  #     - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres:5432/${AIRFLOW_DB_NAME}
+  #   volumes:
+  #     - ./docker/dags:/opt/airflow/dags
+  #     - ./docker/logs:/opt/airflow/logs
+  #     - ./docker/plugins:/opt/airflow/plugins
+  #     - ./banking_dbt:/opt/airflow/banking_dbt
+  #     - ./banking_dbt/.dbt:/home/airflow/.dbt
+  #   command: scheduler
+
+
+
+  # airflow-postgres:
+  #   image: postgres:15
+  #   container_name: airflow-postgres
+  #   restart: always
+  #   environment:
+  #     POSTGRES_USER: ${AIRFLOW_DB_USER}
+  #     POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+  #     POSTGRES_DB: ${AIRFLOW_DB_NAME}
+  #   volumes:
+  #     - airflow_postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5433:5432"  # separate from banking-postgres to avoid conflict
+

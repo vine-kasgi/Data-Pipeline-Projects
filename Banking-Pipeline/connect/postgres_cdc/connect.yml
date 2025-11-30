@@ -1,0 +1,36 @@
+input:
+  label: "postgres-connector"
+  postgres_cdc:
+    dsn: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable" # No default (required)
+    include_transaction_markers: false
+    stream_snapshot: false
+    snapshot_batch_size: 1000
+    schema: "public" # No default (required)
+    tables: ["customers","accounts","transactions"] # No default (required)
+    checkpoint_limit: 1024
+    temporary_slot: false
+    slot_name: "test_slot_native_decoder" # No default (required)
+    pg_standby_timeout: 10s
+    pg_wal_monitor_interval: 3s
+    max_parallel_snapshot_tables: 1
+    auto_replay_nacks: true
+    batching:
+      count: 0
+      byte_size: 0
+      period: ""
+      check: ""
+      processors: [] # No default (optional)
+
+output:
+  label: "to_redpanda"
+  redpanda:
+    seed_brokers:
+      - "redpanda-0:9092"
+    topic: 'banking_server.${! meta("table") }'
+    key: ""
+    partition: ""
+    metadata:
+      include_prefixes: []
+      include_patterns: []
+    allow_auto_topic_creation: true
+    max_in_flight: 256

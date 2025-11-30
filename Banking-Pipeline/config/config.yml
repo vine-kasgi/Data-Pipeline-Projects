@@ -1,0 +1,20 @@
+kafka:
+  brokers: ["redpanda-0:9092"]
+
+schemaRegistry:
+  enabled: true
+  urls: ["http://redpanda-0:8081","http://redpanda-1:8081","http://redpanda-2:8081"]
+
+redpanda:
+  adminApi:
+    enabled: true
+    urls: ["http://redpanda-0:9644","http://redpanda-1:9644","http://redpanda-2:9644"]
+
+kafkaConnect:
+  enabled: false
+
+licenseFilepath: /etc/redpanda/redpanda.license
+
+
+logger:
+  level: info
