@@ -1,5 +1,6 @@
-# ignore the high volume data
-Source
+# ignore the hidden files
+Banking-Pipeline/.*
 
 # virtual environments
 .venv
+
